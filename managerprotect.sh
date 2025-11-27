@@ -26,7 +26,7 @@ read -p "Pilih menu (1-5): " choice
 case $choice in
   1)
     echo "🛡️ Menerapkan proteksi..."
-    bash protect.sh
+    bash <(curl -s https://raw.githubusercontent.com/antirusuhnihdeks/pterodactyl/main/protect.sh)
     ;;
   2)
     echo "⚙️ Generate proteksi dinamis..."
