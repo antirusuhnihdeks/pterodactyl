@@ -50,14 +50,15 @@ fi
 # Pindah ke directory pterodactyl
 cd /var/www/pterodactyl
 
-
-echo "1. Terapkan proteksi (jalankan protect.sh)"
-echo "2. Lihat konfigurasi proteksi"
-echo "3. Reset ke default settings"
-echo "4. KELUAR"
+echo -e "${YELLOW}${BOLD}Pilih mode yang ingin dijalankan:${RESET}"
 echo ""
+echo -e "${GREEN}[1]${RESET} 🔐 Install Protect (Add Protect)"
+echo -e "${GREEN}[2]${RESET} ♻️ Restore Backup (Restore)"
+echo -e "${YELLOW}[3]${RESET} 🚀 Reset Default"
+echo -e "${GREEN}[4]${RESET} KELUAR
+echo ""
+read -p "$(echo -e ${CYAN}${BOLD}"Masukkan pilihan (1/2): "${RESET})" 
 
-read -p "Pilih menu (1-5): " choice
 
 case $choice in
   1)
