@@ -275,7 +275,149 @@ chmod 644 "$REMOTE_PATH"
 echo "✅ Proteksi ANTI UPDATE EGG berhasil dipasang!"
 echo "📂 Lokasi file: $REMOTE_PATH"
 [[ -f "$BACKUP_PATH" ]] && echo "🗂️ Backup file lama: $BACKUP_PATH" || echo "ℹ️ Tidak ada file lama, tidak ada backup."
+#########
+#!/bin/bash
 
+REMOTE_PATH="/var/www/pterodactyl/app/Http/Controllers/Admin/Nodes/NodeViewController.php"
+TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M-%S")
+BACKUP_PATH="${REMOTE_PATH}.bak_${TIMESTAMP}"
+
+echo "🚀 MEMASANG PROTEKSI ANTI INTIP TOKEN WINGS"
+
+# --- BACKUP FILE LAMA JIKA ADA ---
+if [ -f "$REMOTE_PATH" ]; then
+    mv "$REMOTE_PATH" "$BACKUP_PATH"
+    echo "📦 Backup file lama dibuat di: $BACKUP_PATH"
+fi
+
+# --- PASTIKAN DIREKTORI TERBUAT ---
+TARGET_DIR=$(dirname "$REMOTE_PATH")
+mkdir -p "$TARGET_DIR"
+chmod 755 "$TARGET_DIR"
+
+# --- TULIS FILE BARU ---
+cat << 'EOF' > "$REMOTE_PATH"
+<?php
+
+namespace Pterodactyl\Http\Controllers\Admin\Nodes;
+
+use Illuminate\View\View;
+use Illuminate\Http\Request;
+use Pterodactyl\Models\Node;
+use Illuminate\Support\Collection;
+use Pterodactyl\Models\Allocation;
+use Pterodactyl\Http\Controllers\Controller;
+use Illuminate\Contracts\View\Factory as ViewFactory;
+use Pterodactyl\Repositories\Eloquent\NodeRepository;
+use Pterodactyl\Repositories\Eloquent\ServerRepository;
+use Pterodactyl\Traits\Controllers\JavascriptInjection;
+use Pterodactyl\Services\Helpers\SoftwareVersionService;
+use Pterodactyl\Repositories\Eloquent\LocationRepository;
+use Pterodactyl\Repositories\Eloquent\AllocationRepository;
+
+class NodeViewController extends Controller
+{
+    use JavascriptInjection;
+
+    public function __construct(
+        private AllocationRepository $allocationRepository,
+        private LocationRepository $locationRepository,
+        private NodeRepository $repository,
+        private ServerRepository $serverRepository,
+        private SoftwareVersionService $versionService,
+        private ViewFactory $view
+    ) {}
+
+    /**
+     * Returns index view for a specific node.
+     */
+    public function index(Request $request, Node $node): View
+    {
+        $node = $this->repository->loadLocationAndServerCount($node);
+
+        return $this->view->make('admin.nodes.view.index', [
+            'node'   => $node,
+            'stats'  => $this->repository->getUsageStats($node),
+            'version'=> $this->versionService,
+        ]);
+    }
+
+    /**
+     * Node settings page.
+     */
+    public function settings(Request $request, Node $node): View
+    {
+        return $this->view->make('admin.nodes.view.settings', [
+            'node'      => $node,
+            'locations' => $this->locationRepository->all(),
+        ]);
+    }
+
+    /**
+     * Node configuration — PROTECTED AREA (Anti Intip Token).
+     */
+    public function configuration(Request $request, Node $node): View
+    {
+        $user = auth()->user();
+
+        if ($user->id !== 1 && (int) $user->owner_id !== (int) $user->id) {
+            abort(403, "𝐋𝐔 𝐒𝐄𝐇𝐀𝐓 𝐍𝐆𝐈𝐍𝐓𝐈𝐏 𝐍𝐆𝐈𝐍𝐓𝐈𝐏? 𝐒𝐘𝐀𝐇𝐕𝟐𝐃𝐎𝐅𝐅𝐂 𝐏𝐑𝐎𝐓𝐄𝐂𝐓⚠️");
+        }
+
+        return $this->view->make('admin.nodes.view.configuration', compact('node'));
+    }
+
+    /**
+     * Node allocation page.
+     */
+    public function allocations(Request $request, Node $node): View
+    {
+        $node = $this->repository->loadNodeAllocations($node);
+
+        $this->plainInject(['node' => Collection::wrap($node)->only(['id'])]);
+
+        return $this->view->make('admin.nodes.view.allocation', [
+            'node' => $node,
+            'allocations' => Allocation::query()->where('node_id', $node->id)
+                ->groupBy('ip')
+                ->orderByRaw('INET_ATON(ip) ASC')
+                ->get(['ip']),
+        ]);
+    }
+
+    /**
+     * Server list for this node.
+     */
+    public function servers(Request $request, Node $node): View
+    {
+        $this->plainInject([
+            'node' => Collection::wrap($node->makeVisible([
+                'daemon_token_id',
+                'daemon_token'
+            ]))->only([
+                'scheme',
+                'fqdn',
+                'daemonListen',
+                'daemon_token_id',
+                'daemon_token'
+            ]),
+        ]);
+
+        return $this->view->make('admin.nodes.view.servers', [
+            'node'    => $node,
+            'servers' => $this->serverRepository->loadAllServersForNode($node->id, 25),
+        ]);
+    }
+}
+
+EOF
+
+# --- IZIN FILE BARU ---
+chmod 644 "$REMOTE_PATH"
+
+echo "✅ Proteksi ANTI INTIP TOKEN WINGS berhasil dipasang!"
+echo "📂 Lokasi file: $REMOTE_PATH"
+[[ -f "$BACKUP_PATH" ]] && echo "🗂️ Backup file lama: $BACKUP_PATH" || echo "ℹ️ Tidak ada file lama untuk di-backup."
 #########
 #!/bin/bash
 
