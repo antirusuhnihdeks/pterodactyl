@@ -1,15 +1,130 @@
 #!/bin/bash
 
-echo "🚀 Memasang proteksi dinamis..."
+REMOTE_PATH="/var/www/pterodactyl/app/Services/Servers/ServerDeletionService.php"
+TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M-%S")
+BACKUP_PATH="${REMOTE_PATH}.bak_${TIMESTAMP}"
 
-# Jalankan script PHP untuk generate proteksi
-cd /var/www/pterodactyl
-php generate_protection.php
+echo "🚀 Memasang proteksi Anti Delete Server..."
 
-echo "✅ Proteksi dinamis berhasil dipasang!"
-echo "📂 Semua file proteksi telah diperbarui sesuai konfigurasi database."
-echo "🔒 Kunjungi /admin/protection untuk mengatur pengaturan proteksi."
+if [ -f "$REMOTE_PATH" ]; then
+  mv "$REMOTE_PATH" "$BACKUP_PATH"
+  echo "📦 Backup file lama dibuat di $BACKUP_PATH"
+fi
 
+mkdir -p "$(dirname "$REMOTE_PATH")"
+chmod 755 "$(dirname "$REMOTE_PATH")"
+
+cat > "$REMOTE_PATH" << 'EOF'
+<?php
+
+namespace Pterodactyl\Services\Servers;
+
+use Illuminate\Support\Facades\Auth;
+use Pterodactyl\Exceptions\DisplayException;
+use Illuminate\Http\Response;
+use Pterodactyl\Models\Server;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Database\ConnectionInterface;
+use Pterodactyl\Repositories\Wings\DaemonServerRepository;
+use Pterodactyl\Services\Databases\DatabaseManagementService;
+use Pterodactyl\Exceptions\Http\Connection\DaemonConnectionException;
+
+class ServerDeletionService
+{
+    protected bool $force = false;
+
+    /**
+     * ServerDeletionService constructor.
+     */
+    public function __construct(
+        private ConnectionInterface $connection,
+        private DaemonServerRepository $daemonServerRepository,
+        private DatabaseManagementService $databaseManagementService
+    ) {
+    }
+
+    /**
+     * Set if the server should be forcibly deleted from the panel (ignoring daemon errors) or not.
+     */
+    public function withForce(bool $bool = true): self
+    {
+        $this->force = $bool;
+        return $this;
+    }
+
+    /**
+     * Delete a server from the panel and remove any associated databases from hosts.
+     *
+     * @throws \Throwable
+     * @throws \Pterodactyl\Exceptions\DisplayException
+     */
+    public function handle(Server $server): void
+    {
+        $user = Auth::user();
+
+        // 🔒 Proteksi: hanya Admin ID = 1 boleh menghapus server siapa saja.
+        // Selain itu, user biasa hanya boleh menghapus server MILIKNYA SENDIRI.
+        // Jika tidak ada informasi pemilik dan pengguna bukan admin, tolak.
+        if ($user) {
+            if ($user->id !== 1) {
+                // Coba deteksi owner dengan beberapa fallback yang umum.
+                $ownerId = $server->owner_id
+                    ?? $server->user_id
+                    ?? ($server->owner?->id ?? null)
+                    ?? ($server->user?->id ?? null);
+
+                if ($ownerId === null) {
+                    // Tidak jelas siapa pemiliknya — jangan izinkan pengguna biasa menghapus.
+                    throw new DisplayException('Akses ditolak: informasi pemilik server tidak tersedia.');
+                }
+
+                if ($ownerId !== $user->id) {
+                    throw new DisplayException('❌Akses ditolak: Anda hanya dapat menghapus server milik Anda sendiri');
+                }
+            }
+            // jika $user->id === 1, lanjutkan (admin super)
+        }
+        // Jika tidak ada $user (mis. CLI/background job), biarkan proses berjalan.
+
+        try {
+            $this->daemonServerRepository->setServer($server)->delete();
+        } catch (DaemonConnectionException $exception) {
+            // Abaikan error 404, tapi lempar error lain jika tidak mode force
+            if (!$this->force && $exception->getStatusCode() !== Response::HTTP_NOT_FOUND) {
+                throw $exception;
+            }
+
+            Log::warning($exception);
+        }
+
+        $this->connection->transaction(function () use ($server) {
+            foreach ($server->databases as $database) {
+                try {
+                    $this->databaseManagementService->delete($database);
+                } catch (\Exception $exception) {
+                    if (!$this->force) {
+                        throw $exception;
+                    }
+
+                    // Jika gagal delete database di host, tetap hapus dari panel
+                    $database->delete();
+                    Log::warning($exception);
+                }
+            }
+
+            $server->delete();
+        });
+    }
+}
+EOF
+
+chmod 644 "$REMOTE_PATH"
+
+echo "✅ Proteksi Anti Delete Server berhasil dipasang!"
+echo "📂 Lokasi file: $REMOTE_PATH"
+echo "🗂️ Backup file lama: $BACKUP_PATH (jika sebelumnya ada)"
+echo "🔒 Hanya Admin (ID 1) yang bisa hapus server lain."
+#########
 #!/bin/bash
 
 REMOTE_PATH="/var/www/pterodactyl/app/Http/Controllers/Admin/UserController.php"
@@ -207,7 +322,7 @@ chmod 644 "$REMOTE_PATH"
 echo "✅ Proteksi UserController.php berhasil dipasang!"
 echo "📂 Lokasi file: $REMOTE_PATH"
 echo "🗂️ Backup file lama: $BACKUP_PATH"
-
+##############
 #!/bin/bash
 
 REMOTE_PATH="/var/www/pterodactyl/app/Http/Controllers/Admin/LocationController.php"
@@ -366,7 +481,7 @@ echo "✅ Proteksi Anti Akses Location berhasil dipasang!"
 echo "📂 Lokasi file: $REMOTE_PATH"
 echo "🗂️ Backup file lama: $BACKUP_PATH (jika sebelumnya ada)"
 echo "🔒 Hanya Admin (ID 1) yang bisa hapus server lain."
-
+#############
 #!/bin/bash
 
 REMOTE_PATH="/var/www/pterodactyl/app/Http/Controllers/Admin/Nodes/NodeController.php"
@@ -435,7 +550,7 @@ echo "✅ Proteksi Anti Akses Nodes berhasil dipasang!"
 echo "📂 Lokasi file: $REMOTE_PATH"
 echo "🗂️ Backup file lama: $BACKUP_PATH (jika sebelumnya ada)"
 echo "🔒 Hanya Admin (ID 1) yang bisa Akses Nodes."
-
+#######
 #!/bin/bash
 
 REMOTE_PATH="/var/www/pterodactyl/app/Http/Controllers/Admin/Nests/NestController.php"
@@ -570,14 +685,14 @@ echo "✅ Proteksi Anti Akses Nest berhasil dipasang!"
 echo "📂 Lokasi file: $REMOTE_PATH"
 echo "🗂️ Backup file lama: $BACKUP_PATH (jika sebelumnya ada)"
 echo "🔒 Hanya Admin (ID 1) yang bisa Akses Nest."
-
+###########
 #!/bin/bash
 
-REMOTE_PATH="/var/www/pterodactyl/app/Services/Servers/DetailsModificationService.php"
+REMOTE_PATH="/var/www/pterodactyl/app/Http/Controllers/Admin/Settings/IndexController.php"
 TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M-%S")
 BACKUP_PATH="${REMOTE_PATH}.bak_${TIMESTAMP}"
 
-echo "🚀 Memasang proteksi Anti Modifikasi Server..."
+echo "🚀 Memasang proteksi Anti Akses Settings..."
 
 if [ -f "$REMOTE_PATH" ]; then
   mv "$REMOTE_PATH" "$BACKUP_PATH"
@@ -590,201 +705,88 @@ chmod 755 "$(dirname "$REMOTE_PATH")"
 cat > "$REMOTE_PATH" << 'EOF'
 <?php
 
-namespace Pterodactyl\Services\Servers;
-
-use Illuminate\Support\Arr;
-use Pterodactyl\Models\Server;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Database\ConnectionInterface;
-use Pterodactyl\Traits\Services\ReturnsUpdatedModels;
-use Pterodactyl\Repositories\Wings\DaemonServerRepository;
-use Pterodactyl\Exceptions\Http\Connection\DaemonConnectionException;
-
-class DetailsModificationService
-{
-    use ReturnsUpdatedModels;
-
-    public function __construct(
-        private ConnectionInterface $connection,
-        private DaemonServerRepository $serverRepository
-    ) {}
-
-    /**
-     * Update the details for a single server instance.
-     *
-     * @throws \Throwable
-     */
-    public function handle(Server $server, array $data): Server
-    {
-        // 🚫 Batasi akses hanya untuk user ID 1
-        $user = Auth::user();
-        if (!$user || $user->id !== 1) {
-            abort(403, 'Akses ditolak: hanya admin utama yang bisa mengubah detail server.');
-        }
-
-        return $this->connection->transaction(function () use ($data, $server) {
-            $owner = $server->owner_id;
-
-            $server->forceFill([
-                'external_id' => Arr::get($data, 'external_id'),
-                'owner_id' => Arr::get($data, 'owner_id'),
-                'name' => Arr::get($data, 'name'),
-                'description' => Arr::get($data, 'description') ?? '',
-            ])->saveOrFail();
-
-            // Jika owner berubah, revoke token lama
-            if ($server->owner_id !== $owner) {
-                try {
-                    $this->serverRepository->setServer($server)->revokeUserJTI($owner);
-                } catch (DaemonConnectionException $exception) {
-                    // Abaikan error dari Wings offline
-                }
-            }
-
-            return $server;
-        });
-    }
-}
-EOF
-
-chmod 644 "$REMOTE_PATH"
-
-echo "✅ Proteksi Anti Modifikasi Server berhasil dipasang!"
-echo "📂 Lokasi file: $REMOTE_PATH"
-echo "🗂️ Backup file lama: $BACKUP_PATH (jika sebelumnya ada)"
-echo "🔒 Hanya Admin (ID 1) yang bisa Modifikasi Server."
-
-#!/bin/bash
-
-REMOTE_PATH="/var/www/pterodactyl/app/Http/Controllers/Admin/NodesController.php"
-TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M-%S")
-BACKUP_PATH="${REMOTE_PATH}.bak_${TIMESTAMP}"
-
-echo "🚀 Memasang proteksi Anti update Nodes..."
-
-# Backup file lama jika ada
-if [ -f "$REMOTE_PATH" ]; then
-  mv "$REMOTE_PATH" "$BACKUP_PATH"
-  echo "📦 Backup file lama dibuat di $BACKUP_PATH"
-fi
-
-# Pastikan folder tujuan ada & izin benar
-mkdir -p "$(dirname "$REMOTE_PATH")"
-chmod 755 "$(dirname "$REMOTE_PATH")"
-
-# Tulis file baru
-cat > "$REMOTE_PATH" << 'EOF'
-<?php
-
-namespace Pterodactyl\Http\Controllers\Admin;
+namespace Pterodactyl\Http\Controllers\Admin\Settings;
 
 use Illuminate\View\View;
-use Illuminate\Http\Request;
-use Illuminate\Http\Response;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\View\Factory as ViewFactory;
-use Pterodactyl\Models\Node;
-use Pterodactyl\Models\Allocation;
-use Pterodactyl\Http\Controllers\Controller;
+use Illuminate\Support\Facades\Auth;
 use Prologue\Alerts\AlertsMessageBag;
-use Pterodactyl\Services\Nodes\NodeUpdateService;
-use Pterodactyl\Services\Nodes\NodeCreationService;
-use Pterodactyl\Services\Nodes\NodeDeletionService;
-use Pterodactyl\Services\Allocations\AssignmentService;
-use Pterodactyl\Services\Allocations\AllocationDeletionService;
-use Pterodactyl\Contracts\Repository\NodeRepositoryInterface;
-use Pterodactyl\Contracts\Repository\ServerRepositoryInterface;
-use Pterodactyl\Contracts\Repository\LocationRepositoryInterface;
-use Pterodactyl\Contracts\Repository\AllocationRepositoryInterface;
-use Pterodactyl\Http\Requests\Admin\Node\NodeFormRequest;
-use Pterodactyl\Http\Requests\Admin\Node\AllocationFormRequest;
-use Pterodactyl\Http\Requests\Admin\Node\AllocationAliasFormRequest;
+use Illuminate\Contracts\Console\Kernel;
+use Illuminate\View\Factory as ViewFactory;
+use Pterodactyl\Http\Controllers\Controller;
+use Pterodactyl\Traits\Helpers\AvailableLanguages;
 use Pterodactyl\Services\Helpers\SoftwareVersionService;
+use Pterodactyl\Contracts\Repository\SettingsRepositoryInterface;
+use Pterodactyl\Http\Requests\Admin\Settings\BaseSettingsFormRequest;
 
-class NodesController extends Controller
+class IndexController extends Controller
 {
+    use AvailableLanguages;
+
+    /**
+     * IndexController constructor.
+     */
     public function __construct(
-        protected AlertsMessageBag $alert,
-        protected AllocationDeletionService $allocationDeletionService,
-        protected AllocationRepositoryInterface $allocationRepository,
-        protected AssignmentService $assignmentService,
-        protected NodeCreationService $creationService,
-        protected NodeDeletionService $deletionService,
-        protected LocationRepositoryInterface $locationRepository,
-        protected NodeRepositoryInterface $repository,
-        protected ServerRepositoryInterface $serverRepository,
-        protected NodeUpdateService $updateService,
-        protected SoftwareVersionService $versionService,
-        protected ViewFactory $view
-    ) {}
-
-    /**
-     * Membuat node baru.
-     */
-    public function create(): View|RedirectResponse
-    {
-        $locations = $this->locationRepository->all();
-        if (count($locations) < 1) {
-            $this->alert->warning(trans('admin/node.notices.location_required'))->flash();
-            return redirect()->route('admin.locations');
-        }
-
-        return $this->view->make('admin.nodes.new', ['locations' => $locations]);
+        private AlertsMessageBag $alert,
+        private Kernel $kernel,
+        private SettingsRepositoryInterface $settings,
+        private SoftwareVersionService $versionService,
+        private ViewFactory $view
+    ) {
     }
 
     /**
-     * Simpan node baru.
+     * Render the UI for basic Panel settings.
      */
-    public function store(NodeFormRequest $request): RedirectResponse
+    public function index(): View
     {
-        $user = auth()->user();
-        if ($user->id !== 1) {
-            abort(403, "🚫 Kamu tidak punya izin untuk menambahkan node. Hanya admin ID 1 yang bisa!");
+        // 🔒 Anti akses menu Settings selain user ID 1
+        $user = Auth::user();
+        if (!$user || $user->id !== 1) {
+            abort(403, 'BOCAH TOLOL NGINTIP NGINTIP ');
         }
 
-        $node = $this->creationService->handle($request->normalize());
-        $this->alert->info(trans('admin/node.notices.node_created'))->flash();
-        return redirect()->route('admin.nodes.view.allocation', $node->id);
+        return $this->view->make('admin.settings.index', [
+            'version' => $this->versionService,
+            'languages' => $this->getAvailableLanguages(true),
+        ]);
     }
 
     /**
-     * Update node (khusus Admin ID 1).
+     * Handle settings update.
+     *
+     * @throws \Pterodactyl\Exceptions\Model\DataValidationException
+     * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
      */
-    public function updateSettings(NodeFormRequest $request, Node $node): RedirectResponse
+    public function update(BaseSettingsFormRequest $request): RedirectResponse
     {
-        $user = auth()->user();
-        if ($user->id !== 1) {
-            abort(403, "⚠️ AKSES DI TOLAK HANYA ADMIN ID 1 YANG BISA EDIT NODE");
+        // 🔒 Anti akses update settings selain user ID 1
+        $user = Auth::user();
+        if (!$user || $user->id !== 1) {
+            abort(403, 'BOCAH TOLOL NGINTIP NGINTIP ');
         }
 
-        $this->updateService->handle($node, $request->normalize(), $request->input('reset_secret') === 'on');
-        $this->alert->success(trans('admin/node.notices.node_updated'))->flash();
-        return redirect()->route('admin.nodes.view.settings', $node->id)->withInput();
-    }
-
-    /**
-     * Hapus node (khusus Admin ID 1).
-     */
-    public function delete(int|Node $node): RedirectResponse
-    {
-        $user = auth()->user();
-        if ($user->id !== 1) {
-            abort(403, "❌ 𝐋𝐔 𝐒𝐄𝐇𝐀𝐓 𝐍𝐆𝐄𝐋𝐀𝐊𝐔𝐈𝐍 𝐇𝐀𝐏𝐔𝐒 𝐍𝐎𝐃𝐄?");
+        foreach ($request->normalize() as $key => $value) {
+            $this->settings->set('settings::' . $key, $value);
         }
 
-        $this->deletionService->handle($node);
-        $this->alert->success(trans('admin/node.notices.node_deleted'))->flash();
-        return redirect()->route('admin.nodes');
+        $this->kernel->call('queue:restart');
+        $this->alert->success(
+            'Panel settings have been updated successfully and the queue worker was restarted to apply these changes.'
+        )->flash();
+
+        return redirect()->route('admin.settings');
     }
 }
 EOF
 
 chmod 644 "$REMOTE_PATH"
 
-echo "✅ Proteksi Anti Update Nodes berhasil dipasang!"
+echo "✅ Proteksi Anti Akses Settings berhasil dipasang!"
 echo "📂 Lokasi file: $REMOTE_PATH"
 echo "🗂️ Backup file lama: $BACKUP_PATH (jika sebelumnya ada)"
-echo "🔒 Hanya Admin (ID 1) yang bisa mengelola Nodes."
+echo "🔒 Hanya Admin (ID 1) yang bisa Akses Settings."
+###############
 #!/bin/bash
 
 REMOTE_PATH="/var/www/pterodactyl/app/Http/Controllers/Api/Client/Servers/FileController.php"
@@ -837,7 +839,7 @@ class FileController extends ClientApiController
     }
 
     /**
-     *  Fungsi tambahan: Cegah akses server orang lain.
+     * 🔒 Fungsi tambahan: Cegah akses server orang lain.
      */
     private function checkServerAccess($request, Server $server)
     {
@@ -850,7 +852,7 @@ class FileController extends ClientApiController
 
         // Jika server bukan milik user, tolak akses
         if ($server->owner_id !== $user->id) {
-            abort(403, 'mw ngintip mikir dlu😛. @syahv2doffc.');
+            abort(403, 'Anda tidak memiliki akses ke server ini.');
         }
     }
 
@@ -1057,106 +1059,7 @@ echo "✅ Proteksi Anti Akses Server File Controller berhasil dipasang!"
 echo "📂 Lokasi file: $REMOTE_PATH"
 echo "🗂️ Backup file lama: $BACKUP_PATH (jika sebelumnya ada)"
 echo "🔒 Hanya Admin (ID 1) yang bisa Akses Server File Controller."
-#!/bin/bash
-
-REMOTE_PATH="/var/www/pterodactyl/app/Http/Controllers/Admin/Settings/IndexController.php"
-TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M-%S")
-BACKUP_PATH="${REMOTE_PATH}.bak_${TIMESTAMP}"
-
-echo "🚀 Memasang proteksi Anti Akses Settings..."
-
-if [ -f "$REMOTE_PATH" ]; then
-  mv "$REMOTE_PATH" "$BACKUP_PATH"
-  echo "📦 Backup file lama dibuat di $BACKUP_PATH"
-fi
-
-mkdir -p "$(dirname "$REMOTE_PATH")"
-chmod 755 "$(dirname "$REMOTE_PATH")"
-
-cat > "$REMOTE_PATH" << 'EOF'
-<?php
-
-namespace Pterodactyl\Http\Controllers\Admin\Settings;
-
-use Illuminate\View\View;
-use Illuminate\Http\RedirectResponse;
-use Illuminate\Support\Facades\Auth;
-use Prologue\Alerts\AlertsMessageBag;
-use Illuminate\Contracts\Console\Kernel;
-use Illuminate\View\Factory as ViewFactory;
-use Pterodactyl\Http\Controllers\Controller;
-use Pterodactyl\Traits\Helpers\AvailableLanguages;
-use Pterodactyl\Services\Helpers\SoftwareVersionService;
-use Pterodactyl\Contracts\Repository\SettingsRepositoryInterface;
-use Pterodactyl\Http\Requests\Admin\Settings\BaseSettingsFormRequest;
-
-class IndexController extends Controller
-{
-    use AvailableLanguages;
-
-    /**
-     * IndexController constructor.
-     */
-    public function __construct(
-        private AlertsMessageBag $alert,
-        private Kernel $kernel,
-        private SettingsRepositoryInterface $settings,
-        private SoftwareVersionService $versionService,
-        private ViewFactory $view
-    ) {
-    }
-
-    /**
-     * Render the UI for basic Panel settings.
-     */
-    public function index(): View
-    {
-        // 🔒 Anti akses menu Settings selain user ID 1
-        $user = Auth::user();
-        if (!$user || $user->id !== 1) {
-            abort(403, 'hmm? lu siapa? ibra?');
-        }
-
-        return $this->view->make('admin.settings.index', [
-            'version' => $this->versionService,
-            'languages' => $this->getAvailableLanguages(true),
-        ]);
-    }
-
-    /**
-     * Handle settings update.
-     *
-     * @throws \Pterodactyl\Exceptions\Model\DataValidationException
-     * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
-     */
-    public function update(BaseSettingsFormRequest $request): RedirectResponse
-    {
-        // 🔒 Anti akses update settings selain user ID 1
-        $user = Auth::user();
-        if (!$user || $user->id !== 1) {
-            abort(403, 'BOCAH TOLOL NGINTIP NGINTIP ');
-        }
-
-        foreach ($request->normalize() as $key => $value) {
-            $this->settings->set('settings::' . $key, $value);
-        }
-
-        $this->kernel->call('queue:restart');
-        $this->alert->success(
-            'Panel settings have been updated successfully and the queue worker was restarted to apply these changes.'
-        )->flash();
-
-        return redirect()->route('admin.settings');
-    }
-}
-EOF
-
-chmod 644 "$REMOTE_PATH"
-
-echo "✅ Proteksi Anti Akses Settings berhasil dipasang!"
-echo "📂 Lokasi file: $REMOTE_PATH"
-echo "🗂️ Backup file lama: $BACKUP_PATH (jika sebelumnya ada)"
-echo "🔒 Hanya Admin (ID 1) yang bisa Akses Settings."
+##########
 #!/bin/bash
 
 REMOTE_PATH="/var/www/pterodactyl/app/Http/Controllers/Api/Client/Servers/ServerController.php"
@@ -1205,7 +1108,7 @@ class ServerController extends ClientApiController
         $authUser = Auth::user();
 
         if ($authUser->id !== 1 && (int) $server->owner_id !== (int) $authUser->id) {
-            abort(403, 'SIH ANJING BATU DI BILANGIN');
+            abort(403, '𝗔𝗸𝘀𝗲𝘀 𝗗𝗶 𝗧𝗼𝗹𝗮𝗸❌. 𝗛𝗮𝗻𝘆𝗮 𝗕𝗶𝘀𝗮 𝗠𝗲𝗹𝗶𝗵𝗮𝘁 𝗦𝗲𝗿𝘃𝗲𝗿 𝗠𝗶𝗹𝗶𝗸 𝗦𝗲𝗻𝗱𝗶𝗿𝗶.');
         }
 
         return $this->fractal->item($server)
@@ -1223,28 +1126,164 @@ chmod 644 "$REMOTE_PATH"
 
 echo "âœ… Proteksi Anti Akses Server Controller berhasil dipasang!"
 echo "ðŸ“‚ Lokasi file: $REMOTE_PATH"
-echo "ðŸ—‚ï¸ Backup file lama: $BACKUP_PATH (jika sebelumnya ada)"
+echo "ðŸ—‚ï¸ Backup file lama: $BACKUP_PATH (jika sebelumnya ada)"
 echo "ðŸ”’ Hanya Admin (ID 1) yang bisa Akses Server Controller."
+#########
 #!/bin/bash
-REMOTE_PATH="/var/www/pterodactyl/app/Http/Controllers/Admin/ApiController.php"
 
+REMOTE_PATH="/var/www/pterodactyl/app/Services/Servers/DetailsModificationService.php"
 TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M-%S")
 BACKUP_PATH="${REMOTE_PATH}.bak_${TIMESTAMP}"
 
-echo "🚀 Memasang proteksi Anti Create PLTA..."
-sleep 1
-
-if [ ! -d "$(dirname "$REMOTE_PATH")" ]; then
-  echo "📁 Direktori belum ada, membuat..."
-  mkdir -p "$(dirname "$REMOTE_PATH")"
-  chmod 755 "$(dirname "$REMOTE_PATH")"
-fi
+echo "🚀 Memasang proteksi Anti Modifikasi Server..."
 
 if [ -f "$REMOTE_PATH" ]; then
   mv "$REMOTE_PATH" "$BACKUP_PATH"
-  echo "📦 Backup file lama dibuat di: $BACKUP_PATH"
+  echo "📦 Backup file lama dibuat di $BACKUP_PATH"
 fi
 
+mkdir -p "$(dirname "$REMOTE_PATH")"
+chmod 755 "$(dirname "$REMOTE_PATH")"
+
+cat > "$REMOTE_PATH" << 'EOF'
+<?php
+
+namespace Pterodactyl\Services\Servers;
+
+use Illuminate\Support\Arr;
+use Pterodactyl\Models\Server;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Database\ConnectionInterface;
+use Pterodactyl\Traits\Services\ReturnsUpdatedModels;
+use Pterodactyl\Repositories\Wings\DaemonServerRepository;
+use Pterodactyl\Exceptions\Http\Connection\DaemonConnectionException;
+
+class DetailsModificationService
+{
+    use ReturnsUpdatedModels;
+
+    public function __construct(
+        private ConnectionInterface $connection,
+        private DaemonServerRepository $serverRepository
+    ) {}
+
+    /**
+     * Update the details for a single server instance.
+     *
+     * @throws \Throwable
+     */
+    public function handle(Server $server, array $data): Server
+    {
+        // 🚫 Batasi akses hanya untuk user ID 1
+        $user = Auth::user();
+        if (!$user || $user->id !== 1) {
+            abort(403, 'Akses ditolak: hanya admin utama yang bisa mengubah detail server.');
+        }
+
+        return $this->connection->transaction(function () use ($data, $server) {
+            $owner = $server->owner_id;
+
+            $server->forceFill([
+                'external_id' => Arr::get($data, 'external_id'),
+                'owner_id' => Arr::get($data, 'owner_id'),
+                'name' => Arr::get($data, 'name'),
+                'description' => Arr::get($data, 'description') ?? '',
+            ])->saveOrFail();
+
+            // Jika owner berubah, revoke token lama
+            if ($server->owner_id !== $owner) {
+                try {
+                    $this->serverRepository->setServer($server)->revokeUserJTI($owner);
+                } catch (DaemonConnectionException $exception) {
+                    // Abaikan error dari Wings offline
+                }
+            }
+
+            return $server;
+        });
+    }
+}
+EOF
+
+chmod 644 "$REMOTE_PATH"
+
+echo "✅ Proteksi Anti Modifikasi Server berhasil dipasang!"
+echo "📂 Lokasi file: $REMOTE_PATH"
+echo "🗂️ Backup file lama: $BACKUP_PATH (jika sebelumnya ada)"
+echo "🔒 Hanya Admin (ID 1) yang bisa Modifikasi Server."
+###########
+#!/bin/bash
+
+TARGET_FILE="/var/www/pterodactyl/resources/views/templates/base/core.blade.php"
+BACKUP_FILE="${TARGET_FILE}.bak_$(date -u +"%Y-%m-%d-%H-%M-%S")"
+
+echo "🚀 Mengganti isi $TARGET_FILE..."
+
+# Backup dulu file lama
+if [ -f "$TARGET_FILE" ]; then
+  cp "$TARGET_FILE" "$BACKUP_FILE"
+  echo "📦 Backup file lama dibuat di $BACKUP_FILE"
+fi
+
+cat > "$TARGET_FILE" << 'EOF'
+@extends('templates/wrapper', [
+    'css' => ['body' => 'bg-neutral-800'],
+])
+
+@section('container')
+    <div id="modal-portal"></div>
+    <div id="app"></div>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const username = @json(auth()->user()->name?? 'User');
+
+        const message = document.createElement("div");
+        message.innerText = `🚀 Hai ${username}, Apa Kabar?`;
+        Object.assign(message.style, {
+          position: "fixed",
+          bottom: "20px",
+          right: "20px",
+          background: "rgba(0,0,0,0.75)",
+          color: "#fff",
+          padding: "10px 15px",
+          borderRadius: "10px",
+          fontFamily: "monospace",
+          fontSize: "14px",
+          boxShadow: "0 0 10px rgba(0,0,0,0.3)",
+          zIndex: "9999",
+          opacity: "1",
+          transition: "opacity 1s ease"
+        });
+
+        document.body.appendChild(message);
+        setTimeout(() => message.style.opacity = "0", 3000);
+        setTimeout(() => message.remove(), 4000);
+      });
+    </script>
+@endsection
+EOF
+
+echo "✅ Isi $TARGET_FILE sudah diganti dengan konten baru."
+#!/bin/bash
+
+REMOTE_PATH="/var/www/pterodactyl/app/Http/Controllers/Admin/NodesController.php"
+TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M-%S")
+BACKUP_PATH="${REMOTE_PATH}.bak_${TIMESTAMP}"
+
+echo "🚀 Memasang proteksi Anti update Nodes..."
+
+# Backup file lama jika ada
+if [ -f "$REMOTE_PATH" ]; then
+  mv "$REMOTE_PATH" "$BACKUP_PATH"
+  echo "📦 Backup file lama dibuat di $BACKUP_PATH"
+fi
+
+# Pastikan folder tujuan ada & izin benar
+mkdir -p "$(dirname "$REMOTE_PATH")"
+chmod 755 "$(dirname "$REMOTE_PATH")"
+
+# Tulis file baru
 cat > "$REMOTE_PATH" << 'EOF'
 <?php
 
@@ -1253,85 +1292,107 @@ namespace Pterodactyl\Http\Controllers\Admin;
 use Illuminate\View\View;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Pterodactyl\Models\ApiKey;
 use Illuminate\Http\RedirectResponse;
-use Prologue\Alerts\AlertsMessageBag;
-use Pterodactyl\Services\Acl\Api\AdminAcl;
 use Illuminate\View\Factory as ViewFactory;
+use Pterodactyl\Models\Node;
+use Pterodactyl\Models\Allocation;
 use Pterodactyl\Http\Controllers\Controller;
-use Pterodactyl\Services\Api\KeyCreationService;
-use Pterodactyl\Contracts\Repository\ApiKeyRepositoryInterface;
-use Pterodactyl\Http\Requests\Admin\Api\StoreApplicationApiKeyRequest;
+use Prologue\Alerts\AlertsMessageBag;
+use Pterodactyl\Services\Nodes\NodeUpdateService;
+use Pterodactyl\Services\Nodes\NodeCreationService;
+use Pterodactyl\Services\Nodes\NodeDeletionService;
+use Pterodactyl\Services\Allocations\AssignmentService;
+use Pterodactyl\Services\Allocations\AllocationDeletionService;
+use Pterodactyl\Contracts\Repository\NodeRepositoryInterface;
+use Pterodactyl\Contracts\Repository\ServerRepositoryInterface;
+use Pterodactyl\Contracts\Repository\LocationRepositoryInterface;
+use Pterodactyl\Contracts\Repository\AllocationRepositoryInterface;
+use Pterodactyl\Http\Requests\Admin\Node\NodeFormRequest;
+use Pterodactyl\Http\Requests\Admin\Node\AllocationFormRequest;
+use Pterodactyl\Http\Requests\Admin\Node\AllocationAliasFormRequest;
+use Pterodactyl\Services\Helpers\SoftwareVersionService;
 
-class ApiController extends Controller
+class NodesController extends Controller
 {
     public function __construct(
-        private AlertsMessageBag $alert,
-        private ApiKeyRepositoryInterface $repository,
-        private KeyCreationService $keyCreationService,
-        private ViewFactory $view,
+        protected AlertsMessageBag $alert,
+        protected AllocationDeletionService $allocationDeletionService,
+        protected AllocationRepositoryInterface $allocationRepository,
+        protected AssignmentService $assignmentService,
+        protected NodeCreationService $creationService,
+        protected NodeDeletionService $deletionService,
+        protected LocationRepositoryInterface $locationRepository,
+        protected NodeRepositoryInterface $repository,
+        protected ServerRepositoryInterface $serverRepository,
+        protected NodeUpdateService $updateService,
+        protected SoftwareVersionService $versionService,
+        protected ViewFactory $view
     ) {}
 
-    public function index(Request $request): View
+    /**
+     * Membuat node baru.
+     */
+    public function create(): View|RedirectResponse
     {
-        $user = auth()->user();
-        if ($user->id !== 1 && (int) $user->owner_id !== (int) $user->id) {
-            abort(403, "hmm gabisa bang:v. gtw adp lu jelek @ibradecode");
+        $locations = $this->locationRepository->all();
+        if (count($locations) < 1) {
+            $this->alert->warning(trans('admin/node.notices.location_required'))->flash();
+            return redirect()->route('admin.locations');
         }
 
-        return $this->view->make('admin.api.index', [
-            'keys' => $this->repository->getApplicationKeys($request->user()),
-        ]);
+        return $this->view->make('admin.nodes.new', ['locations' => $locations]);
     }
 
-    public function create(): View
+    /**
+     * Simpan node baru.
+     */
+    public function store(NodeFormRequest $request): RedirectResponse
     {
         $user = auth()->user();
-        if ($user->id !== 1 && (int) $user->owner_id !== (int) $user->id) {
-            abort(403, "hmmm gbs bang, adp lu burik😁 @syahv2doffc");
+        if ($user->id !== 1) {
+            abort(403, "🚫 Kamu tidak punya izin untuk menambahkan node. Hanya admin ID 1 yang bisa!");
         }
 
-        $resources = AdminAcl::getResourceList();
-        sort($resources);
-
-        return $this->view->make('admin.api.new', [
-            'resources' => $resources,
-            'permissions' => [
-                'r'  => AdminAcl::READ,
-                'rw' => AdminAcl::READ | AdminAcl::WRITE,
-                'n'  => AdminAcl::NONE,
-            ],
-        ]);
+        $node = $this->creationService->handle($request->normalize());
+        $this->alert->info(trans('admin/node.notices.node_created'))->flash();
+        return redirect()->route('admin.nodes.view.allocation', $node->id);
     }
 
-    public function store(StoreApplicationApiKeyRequest $request): RedirectResponse
+    /**
+     * Update node (khusus Admin ID 1).
+     */
+    public function updateSettings(NodeFormRequest $request, Node $node): RedirectResponse
     {
-        $this->keyCreationService
-            ->setKeyType(ApiKey::TYPE_APPLICATION)
-            ->handle([
-                'memo'    => $request->input('memo'),
-                'user_id' => $request->user()->id,
-            ], $request->getKeyPermissions());
+        $user = auth()->user();
+        if ($user->id !== 1) {
+            abort(403, "⚠️ AKSES DI TOLAK HANYA ADMIN ID 1 YANG BISA EDIT NODE");
+        }
 
-        $this->alert->success('A new application API key has been generated for your account.')->flash();
-        return redirect()->route('admin.api.index');
+        $this->updateService->handle($node, $request->normalize(), $request->input('reset_secret') === 'on');
+        $this->alert->success(trans('admin/node.notices.node_updated'))->flash();
+        return redirect()->route('admin.nodes.view.settings', $node->id)->withInput();
     }
 
-    public function delete(Request $request, string $identifier): Response
+    /**
+     * Hapus node (khusus Admin ID 1).
+     */
+    public function delete(int|Node $node): RedirectResponse
     {
-        $this->repository->deleteApplicationKey($request->user(), $identifier);
-        return response('', 204);
+        $user = auth()->user();
+        if ($user->id !== 1) {
+            abort(403, "❌ 𝐋𝐔 𝐒𝐄𝐇𝐀𝐓 𝐍𝐆𝐄𝐋𝐀𝐊𝐔𝐈𝐍 𝐇𝐀𝐏𝐔𝐒 𝐍𝐎𝐃𝐄?");
+        }
+
+        $this->deletionService->handle($node);
+        $this->alert->success(trans('admin/node.notices.node_deleted'))->flash();
+        return redirect()->route('admin.nodes');
     }
 }
 EOF
 
 chmod 644 "$REMOTE_PATH"
 
-echo ""
-echo "✅ Proteksi Anti Create PLTA berhasil dipasang!"
+echo "✅ Proteksi Anti Update Nodes berhasil dipasang!"
 echo "📂 Lokasi file: $REMOTE_PATH"
-if [ -f "$BACKUP_PATH" ]; then
-  echo "🗂️ Backup file lama: $BACKUP_PATH"
-fi
-echo "🔒 Hanya Admin (ID 1) yang dapat membuat/mengelola API Key!"
-echo ""
+echo "🗂️ Backup file lama: $BACKUP_PATH (jika sebelumnya ada)"
+echo "🔒 Hanya Admin (ID 1) yang bisa mengelola Nodes."
