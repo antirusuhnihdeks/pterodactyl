@@ -55,7 +55,7 @@ cd /var/www/pterodactyl || { echo "❌ Folder /var/www/pterodactyl tidak ditemuk
 echo -e "${YELLOW}${BOLD}Pilih mode yang ingin dijalankan:${RESET}"
 echo ""
 echo -e "${GREEN}[1]${RESET} 🔐 Install Protect (Add Protect)"
-echo -e "${GREEN}[2]${RESET} ♻️ Restore Backup (Restore)"
+echo -e "${GREEN}[2]${RESET} ♻️ Konfigurasi protect"
 echo -e "${YELLOW}[3]${RESET} 🚀 Reset Default"
 echo -e "${GREEN}[4]${RESET} Keluar"
 echo ""
