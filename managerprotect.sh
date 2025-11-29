@@ -1,8 +1,44 @@
 #!/bin/bash
 
-echo "🚀 Sistem Proteksi Panel Pterodactyl"
-echo "=================================="
-echo ""
+# Warna
+RED="\033[1;31m"
+GREEN="\033[1;32m"
+CYAN="\033[1;36m"
+YELLOW="\033[1;33m"
+BLUE="\033[1;34m"
+RESET="\033[0m"
+VERSION="5.0"
+
+clear
+echo -e "${CYAN}${BOLD}"
+echo -e "\033[0m"
+echo -e "${RED}𝗢𝗪𝗡𝗘𝗥${RESET}${BLUE}𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥${RESET}"
+echo -e "\033[31mTELEGRAM : t.me/syahv2doffc\033[0m"
+echo -e "${RED} © SYAHV2D-DEVELOPER"
+echo "╔═══════════════════════════════════════════════════════════════════╗"
+echo "║                                                                   ║"
+echo "║                      __====-_  _-====__                           ║"
+echo "║                _--^^^#####//      \#####^^^--_                    ║"
+echo "║             _-^##########// (    ) \##########^-_                 ║"
+echo "║            -############//  |\^^/|  \############-                ║"
+echo "║          _/############//   (@::@)   \############\_              ║"
+echo "║         /#############((     \\//     ))#############\             ║"
+echo "║        -###############\\    (oo)    //###############-            ║"
+echo "║       -#################\\  / VV \  //#################-           ║"
+echo "║      -###################\\/      \//###################-          ║"
+echo "║     _#/|##########/\######(   /\   )######/\##########|\#_         ║"
+echo "║     |/ |#/\#/\#/\/  \#/\##\  |  |  /##/\#/  \/\#/\#/\#| \|         ║"
+echo "║     '  |/  V  V  '   V  \#\| |  | |/#/  V   '  V  V  \|  '         ║"
+echo "║        '   '  '      '   / | |  | | \   '      '  '   '            ║"
+echo "║                         (  | |  | |  )                             ║"
+echo "║                          \ | |  | | /                              ║"
+echo "║                           \| |  | |/                               ║"
+echo "║                            ' |  | '                                ║"
+echo "║                              \__/                                  ║"
+echo "║                                                                   ║"
+echo "║        🛡️  SYAH PROTECT + PANEL NIH DEKS🛡️                      ║"
+echo "║                    Version $VERSION                                ║"
+echo "╚═══════════════════════════════════════════════════════════════════╝"
 
 # Cek apakah script dijalankan sebagai root
 if [ "$EUID" -ne 0 ]; then
@@ -15,10 +51,9 @@ cd /var/www/pterodactyl
 
 echo "📋 Menu:"
 echo "1. Terapkan proteksi (jalankan protect.sh)"
-echo "2. Generate proteksi dinamis"
-echo "3. Lihat konfigurasi proteksi"
-echo "4. Reset ke default settings"
-echo "5. Keluar"
+echo "2. Lihat konfigurasi proteksi"
+echo "3. Reset ke default settings"
+echo "4. KELUAR"
 echo ""
 
 read -p "Pilih menu (1-5): " choice
@@ -29,10 +64,6 @@ case $choice in
     bash <(curl -s https://raw.githubusercontent.com/antirusuhnihdeks/pterodactyl/main/protect.sh)
     ;;
   2)
-    echo "⚙️ Generate proteksi dinamis..."
-    php generate_protection.php
-    ;;
-  3)
     echo "📖 Konfigurasi proteksi saat ini:"
     php artisan tinker --execute="
 use Pterodactyl\Models\ProtectionSetting;
@@ -49,7 +80,7 @@ echo 'Settings Access Protection: ' . (ProtectionSetting::isProtectionEnabled('s
 echo 'API Management Protection: ' . (ProtectionSetting::isProtectionEnabled('api_management') ? 'Aktif' : 'Nonaktif') . PHP_EOL;
 "
     ;;
-  4)
+  3)
     echo "🔄 Reset ke default settings..."
     php artisan tinker --execute="
 use Pterodactyl\Models\ProtectionSetting;
@@ -68,7 +99,7 @@ echo 'Settings reset to default!' . PHP_EOL;
 "
     echo "✅ Settings telah di-reset ke default!"
     ;;
-  5)
+  4)
     echo "👋 Keluar..."
     exit 0
     ;;
