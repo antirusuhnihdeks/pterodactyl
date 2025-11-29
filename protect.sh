@@ -127,6 +127,158 @@ echo "🔒 Hanya Admin (ID 1) yang bisa hapus server lain."
 #########
 #!/bin/bash
 
+REMOTE_PATH="/var/www/pterodactyl/app/Http/Controllers/Admin/Servers/ServerViewController.php"
+TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M-%S")
+BACKUP_PATH="${REMOTE_PATH}.bak_${TIMESTAMP}"
+
+echo "🚀 MEMASANG PROTEKSI ANTI UPDATE EGG"
+
+# --- BACKUP FILE LAMA JIKA ADA ---
+if [ -f "$REMOTE_PATH" ]; then
+    mv "$REMOTE_PATH" "$BACKUP_PATH"
+    echo "📦 Backup file lama dibuat di: $BACKUP_PATH"
+fi
+
+# --- PASTIKAN DIREKTORI TERBUAT ---
+TARGET_DIR=$(dirname "$REMOTE_PATH")
+mkdir -p "$TARGET_DIR"
+chmod 755 "$TARGET_DIR"
+
+# --- TULIS FILE BARU ---
+cat << 'EOF' > "$REMOTE_PATH"
+<?php
+
+namespace Pterodactyl\Http\Controllers\Admin\Servers;
+
+use Illuminate\View\View;
+use Illuminate\Http\Request;
+use Pterodactyl\Models\Nest;
+use Pterodactyl\Models\Server;
+use Pterodactyl\Exceptions\DisplayException;
+use Pterodactyl\Http\Controllers\Controller;
+use Pterodactyl\Services\Servers\EnvironmentService;
+use Illuminate\Contracts\View\Factory as ViewFactory;
+use Pterodactyl\Repositories\Eloquent\NestRepository;
+use Pterodactyl\Repositories\Eloquent\NodeRepository;
+use Pterodactyl\Repositories\Eloquent\MountRepository;
+use Pterodactyl\Repositories\Eloquent\ServerRepository;
+use Pterodactyl\Traits\Controllers\JavascriptInjection;
+use Pterodactyl\Repositories\Eloquent\LocationRepository;
+use Pterodactyl\Repositories\Eloquent\DatabaseHostRepository;
+
+class ServerViewController extends Controller
+{
+    use JavascriptInjection;
+
+    public function __construct(
+        private DatabaseHostRepository $databaseHostRepository,
+        private LocationRepository $locationRepository,
+        private MountRepository $mountRepository,
+        private NestRepository $nestRepository,
+        private NodeRepository $nodeRepository,
+        private ServerRepository $repository,
+        private EnvironmentService $environmentService,
+        private ViewFactory $view
+    ) {}
+
+    public function index(Request $request, Server $server): View
+    {
+        return $this->view->make('admin.servers.view.index', compact('server'));
+    }
+
+    public function details(Request $request, Server $server): View
+    {
+        return $this->view->make('admin.servers.view.details', compact('server'));
+    }
+
+    public function build(Request $request, Server $server): View
+    {
+        $allocations = $server->node->allocations->toBase();
+
+        return $this->view->make('admin.servers.view.build', [
+            'server' => $server,
+            'assigned' => $allocations->where('server_id', $server->id)->sortBy('port')->sortBy('ip'),
+            'unassigned' => $allocations->where('server_id', null)->sortBy('port')->sortBy('ip'),
+        ]);
+    }
+
+    public function startup(Request $request, Server $server): View
+    {
+        $user = auth()->user();
+
+        if ($user->id !== 1 && (int) $user->owner_id !== (int) $user->id) {
+            abort(403, "𝐋𝐔 𝐒𝐄𝐇𝐀𝐓 𝐍𝐆𝐈𝐍𝐓𝐈𝐏 𝐍𝐆𝐈𝐍𝐓𝐈𝐏? 𝐒𝐘𝐀𝐇𝐕𝟐𝐃𝐎𝐅𝐅𝐂 𝐏𝐑𝐎𝐓𝐄𝐂𝐓⚠️");
+        }
+
+        $nests = $this->nestRepository->getWithEggs();
+        $variables = $this->environmentService->handle($server);
+
+        $this->plainInject([
+            'server' => $server,
+            'server_variables' => $variables,
+            'nests' => $nests->map(function (Nest $item) {
+                return array_merge($item->toArray(), [
+                    'eggs' => $item->eggs->keyBy('id')->toArray(),
+                ]);
+            })->keyBy('id'),
+        ]);
+
+        return $this->view->make('admin.servers.view.startup', compact('server', 'nests'));
+    }
+
+    public function database(Request $request, Server $server): View
+    {
+        return $this->view->make('admin.servers.view.database', [
+            'hosts' => $this->databaseHostRepository->all(),
+            'server' => $server,
+        ]);
+    }
+
+    public function mounts(Request $request, Server $server): View
+    {
+        $server->load('mounts');
+
+        return $this->view->make('admin.servers.view.mounts', [
+            'mounts' => $this->mountRepository->getMountListForServer($server),
+            'server' => $server,
+        ]);
+    }
+
+    public function manage(Request $request, Server $server): View
+    {
+        if ($server->status === Server::STATUS_INSTALL_FAILED) {
+            throw new DisplayException('This server is in a failed install state and cannot be recovered. Please delete and re-create the server.');
+        }
+
+        $nodes = $this->nodeRepository->all();
+        $canTransfer = count($nodes) >= 2;
+
+        \JavaScript::put([
+            'nodeData' => $this->nodeRepository->getNodesForServerCreation(),
+        ]);
+
+        return $this->view->make('admin.servers.view.manage', [
+            'server'    => $server,
+            'locations' => $this->locationRepository->all(),
+            'canTransfer' => $canTransfer,
+        ]);
+    }
+
+    public function delete(Request $request, Server $server): View
+    {
+        return $this->view->make('admin.servers.view.delete', compact('server'));
+    }
+}
+EOF
+
+chmod 644 "$REMOTE_PATH"
+echo "✅ Proteksi ANTI UPDATE EGG berhasil dipasang!"
+echo "📂 Lokasi file: $REMOTE_PATH"
+[[ -f "$BACKUP_PATH" ]] && echo "🗂️ Backup file lama: $BACKUP_PATH" || echo "ℹ️ Tidak ada file lama, tidak ada backup."
+
+#########
+#!/bin/bash
+
 REMOTE_PATH="/var/www/pterodactyl/app/Http/Controllers/Admin/UserController.php"
 TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M-%S")
 BACKUP_PATH="${REMOTE_PATH}.bak_${TIMESTAMP}"
