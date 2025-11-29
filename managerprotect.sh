@@ -10,11 +10,7 @@ RESET="\033[0m"
 VERSION="5.0"
 
 clear
-echo -e "${CYAN}${BOLD}"
-echo -e "\033[0m"
-echo -e "${RED}𝗢𝗪𝗡𝗘𝗥${RESET}${BLUE}𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥${RESET}"
-echo -e "\033[31mTELEGRAM : t.me/syahv2doffc\033[0m"
-echo -e "${RED} © SYAHV2D-DEVELOPER"
+echo -e "\033[1;33m"
 echo "╔═══════════════════════════════════════════════════════════════════╗"
 echo "║                                                                   ║"
 echo "║                      __====-_  _-====__                           ║"
@@ -39,7 +35,12 @@ echo "║                                                                   ║"
 echo "║        🛡️  SYAH PROTECT + PANEL NIH DEKS🛡️                      ║"
 echo "║                    Version $VERSION                                ║"
 echo "╚═══════════════════════════════════════════════════════════════════╝"
-
+echo -e "\033[1;33m"
+echo -e "${CYAN}${BOLD}"
+echo -e "\033[0m"
+echo -e "${RED}𝗢𝗪𝗡𝗘𝗥${RESET}${BLUE}𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥${RESET}"
+echo -e "\033[31mTELEGRAM : t.me/syahv2doffc\033[0m"
+echo -e "${RED} © SYAHV2D-DEVELOPER"
 # Cek apakah script dijalankan sebagai root
 if [ "$EUID" -ne 0 ]; then
   echo "❌ Script ini harus dijalankan sebagai root!"
@@ -49,7 +50,7 @@ fi
 # Pindah ke directory pterodactyl
 cd /var/www/pterodactyl
 
-echo "📋 Menu:"
+
 echo "1. Terapkan proteksi (jalankan protect.sh)"
 echo "2. Lihat konfigurasi proteksi"
 echo "3. Reset ke default settings"
