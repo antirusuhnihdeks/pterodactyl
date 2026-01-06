@@ -54,7 +54,7 @@ $disk_space
 /var/lib/pterodactyl/volumes
 EOF
 
-php artisan p:allocation:make <<EOF
+php artisan p:node:allocation add <<EOF
 $node_name
 $ip_address
 $port
