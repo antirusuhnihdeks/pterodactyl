@@ -1,5 +1,6 @@
 #!/bin/bash
 
+
 # Minta input dari pengguna.
 echo "Masukkan nama lokasi: "
 read location_name
@@ -53,11 +54,11 @@ $disk_space
 /var/lib/pterodactyl/volumes
 EOF
 
+php artisan p:allocation:generate <<EOF
+$node_name
+$ip_address
+$port
+EOF
 
-php artisan p:node:allocation add \
---node=1 \
---ip=$ip_address \
---ports=$port 
-
-echo "Proses pembuatan node & allocation telah selesai."
+echo "Proses pembuatan node telah selesai."
 exit 0
