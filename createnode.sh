@@ -16,6 +16,14 @@ echo "Masukkan jumlah maksimum disk space (dalam MB): "
 read disk_space
 echo "Masukkan Locid: "
 read locid
+echo "Masukkan IP address untuk allocation: "
+read ip_address
+echo "Masukkan Port (contoh: 25565): "
+read port
+echo "Masukkan IP alias (boleh kosong): "
+read ip_alias
+echo "Masukan domain node: "
+read domain_node
 
 # Ubah ke direktori pterodactyl
 cd /var/www/pterodactyl || { echo "Direktori tidak ditemukan"; exit 1; }
@@ -46,4 +54,13 @@ $disk_space
 /var/lib/pterodactyl/volumes
 EOF
 
-echo "Proses pembuatan lokasi dan node telah selesai."
+php artisan p:allocation:make <<EOF
+$node_name
+$ip_address
+$port
+$ip_alias
+$domain_node
+EOF
+
+echo "Proses pembuatan node telah selesai."
+exit 0
